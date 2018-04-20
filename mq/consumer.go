@@ -50,6 +50,13 @@ func (c Consumer) Name() string {
 	return c.name
 }
 
+// CloseChan 该接口仅用于测试使用, 勿手动调用
+func (c *Consumer) CloseChan() {
+	c.mutex.Lock()
+	c.ch.Close()
+	c.mutex.Unlock()
+}
+
 func (c *Consumer) SetExchangeBinds(eb []*ExchangeBinds) *Consumer {
 	c.mutex.Lock()
 	if c.state != StateOpened {

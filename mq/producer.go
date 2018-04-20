@@ -48,6 +48,13 @@ func (p Producer) Name() string {
 	return p.name
 }
 
+// CloseChan 仅用于测试使用,勿手动调用
+func (p *Producer) CloseChan() {
+	p.mutex.Lock()
+	p.ch.Close()
+	p.mutex.Unlock()
+}
+
 func (p *Producer) SetExchangeBinds(eb []*ExchangeBinds) *Producer {
 	p.mutex.Lock()
 	if p.state != StateOpened {

@@ -51,9 +51,9 @@ func main() {
 	}
 
 	for i := 0; i < 1000; i++ {
-		//if i > 0 && i%3 == 0 {
-		//	p.ch.Close() // 模拟channel关闭, 测试重联
-		//}
+		if i > 0 && i%3 == 0 {
+			p.CloseChan()
+		}
 		err = p.Publish("exch.unitest", "route.unitest2", mq.NewPublishMsg([]byte(`{"name":"zwf"}`)))
 		log.Info("Produce state:%d, err:%v\n", p.State(), err)
 		time.Sleep(time.Second)
