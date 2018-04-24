@@ -27,6 +27,8 @@ type Producer struct {
 	// MQ的exchange与其绑定的queues
 	exchangeBinds []*ExchangeBinds
 
+	// 监听publish confirm
+	confirmC chan amqp.Confirmation
 	// 监听会话channel关闭
 	closeC chan *amqp.Error
 	// Producer关闭控制
@@ -94,9 +96,15 @@ func (p *Producer) Open() error {
 	p.ch = ch
 	p.state = StateOpened
 	p.stopC = make(chan struct{})
-	p.closeC = make(chan *amqp.Error, 1)
+
+	p.confirmC = make(chan amqp.Confirmation, 1) // channel关闭时自动关闭
+	p.ch.Confirm(false)
+	p.ch.NotifyPublish(p.confirmC)
+
+	p.closeC = make(chan *amqp.Error, 1) // channel关闭时自动关闭
 	p.ch.NotifyClose(p.closeC)
 
+	go p.listenConfirm()
 	go p.keepalive()
 
 	return nil
@@ -175,6 +183,19 @@ func (p *Producer) keepalive() {
 			return
 		}
 		log.Error("MQ: Producer(%s) try to recover channel over maxRetry(%d), so exit", p.name, maxRetry)
+	}
+}
+
+func (p *Producer) listenConfirm() {
+	for {
+		select {
+		case <-p.stopC:
+			return
+		case <-p.closeC:
+			return
+		case confirms := <-p.confirmC:
+			log.Warn("Receive confirm, %d, %t", confirms.DeliveryTag, confirms.Ack)
+		}
 	}
 }
 
