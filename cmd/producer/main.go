@@ -3,8 +3,8 @@ package main
 import (
 	"time"
 
-	"github.com/Hurricanezwf/rabbitmq/g"
-	"github.com/Hurricanezwf/rabbitmq/mq"
+	"github.com/Hurricanezwf/rabbitmq-go/g"
+	"github.com/Hurricanezwf/rabbitmq-go/mq"
 	"github.com/Hurricanezwf/toolbox/log"
 )
 

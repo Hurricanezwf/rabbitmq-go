@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Hurricanezwf/toolbox/log"
@@ -241,4 +242,34 @@ func applyExchangeBinds(ch *amqp.Channel, exchangeBinds []*ExchangeBinds) (err e
 		}
 	}
 	return nil
+}
+
+type confirmHelper struct {
+	// rrd size
+	size uint64
+	rrd  []chan bool
+
+	// ackIdx
+	lastAckIdx uint64
+}
+
+// size should be large enough to avoid read/write concurrently
+func newConfirmHelper(size uint64) confirmHelper {
+	if size <= 0 {
+		panic("Size must be over 0")
+	}
+	var h = confirmHelper{
+		lastAckIdx: 0,
+		size:       size,
+		rrd:        make([]chan bool, size),
+	}
+	return h
+}
+
+func (h *confirmHelper) listen() <-chan bool {
+	curIdx := atomic.AddUint64(&h.lastAckIdx, uint64(1))
+	curIdx = curIdx % size
+	ch := h.rrd[curIdx]
+	if ch == nil {
+	}
 }
