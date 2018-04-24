@@ -1,8 +1,6 @@
 package main
 
 import (
-	"time"
-
 	"github.com/Hurricanezwf/rabbitmq-go/g"
 	"github.com/Hurricanezwf/rabbitmq-go/mq"
 	"github.com/Hurricanezwf/toolbox/log"
@@ -55,13 +53,13 @@ func main() {
 		return
 	}
 
-	i := 0
+	//i := 0
 	for msg := range msgC {
-		i++
-		if i%5 == 0 {
-			c.CloseChan()
-		}
+		//i++
+		//if i%5 == 0 {
+		//	c.CloseChan()
+		//}
 		log.Info("Consumer receive msg `%s`", string(msg))
-		time.Sleep(time.Second)
+		//time.Sleep(time.Second)
 	}
 }
