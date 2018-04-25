@@ -55,11 +55,12 @@ func main() {
 
 	//i := 0
 	for msg := range msgC {
+		_ = msg
 		//i++
 		//if i%5 == 0 {
 		//	c.CloseChan()
 		//}
-		log.Info("Consumer receive msg `%s`", string(msg))
+		//log.Info("Consumer receive msg `%s`", string(msg))
 		//time.Sleep(time.Second)
 	}
 }

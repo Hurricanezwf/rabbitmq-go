@@ -28,8 +28,16 @@ type Producer struct {
 	// MQ的exchange与其绑定的queues
 	exchangeBinds []*ExchangeBinds
 
+	// 生产者confirm开关
+	enableConfirm bool
 	// 监听publish confirm
 	confirmC chan amqp.Confirmation
+	// confirm结果检测
+	confirm *confirmHelper
+	// confirm RRD大小, 理论上RRD越大,冲突概率越小,但响应的资源消耗越大
+	// 视最大并发量而定, 默认1024
+	rrdSize uint64
+
 	// 监听会话channel关闭
 	closeC chan *amqp.Error
 	// Producer关闭控制
@@ -41,9 +49,10 @@ type Producer struct {
 
 func newProducer(name string, mq *MQ) *Producer {
 	return &Producer{
-		name:  name,
-		mq:    mq,
-		state: StateClosed,
+		name:    name,
+		mq:      mq,
+		state:   StateClosed,
+		rrdSize: 1024,
 	}
 }
 
@@ -58,6 +67,24 @@ func (p *Producer) CloseChan() {
 	p.mutex.Unlock()
 }
 
+// Confirm 是否开启生产者confirm功能, 默认为false, 该选项在Open()前设置.
+// 说明: 目前仅实现串行化的confirm, 每次的等待confirm额外需要约50ms,建议上层并发调用Publish
+func (p *Producer) Confirm(enable bool) *Producer {
+	p.mutex.Lock()
+	p.enableConfirm = enable
+	p.mutex.Unlock()
+	return p
+}
+
+// RRDSize 设置无锁环形缓冲区的大小, 默认为1024
+// Producer Open之后将无法重置
+func (p *Producer) RRDSize(size uint64) *Producer {
+	p.mutex.Lock()
+	p.rrdSize = size
+	p.mutex.Unlock()
+	return p
+}
+
 func (p *Producer) SetExchangeBinds(eb []*ExchangeBinds) *Producer {
 	p.mutex.Lock()
 	if p.state != StateOpened {
@@ -68,27 +95,25 @@ func (p *Producer) SetExchangeBinds(eb []*ExchangeBinds) *Producer {
 }
 
 func (p *Producer) Open() error {
-	if p.mq == nil {
-		return errors.New("MQ: Bad producer")
-	}
-
-	// Open期间不允许对channel做任何操作
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
+	// 条件检测
+	if p.mq == nil {
+		return errors.New("MQ: Bad producer")
+	}
 	if len(p.exchangeBinds) <= 0 {
 		return errors.New("MQ: No exchangeBinds found. You should SetExchangeBinds before open.")
 	}
-
 	if p.state == StateOpened {
 		return errors.New("MQ: Producer had been opened")
 	}
 
+	// 创建并初始化channel
 	ch, err := p.mq.channel()
 	if err != nil {
 		return fmt.Errorf("MQ: Create channel failed, %v", err)
 	}
-
 	if err = applyExchangeBinds(ch, p.exchangeBinds); err != nil {
 		ch.Close()
 		return err
@@ -96,17 +121,29 @@ func (p *Producer) Open() error {
 
 	p.ch = ch
 	p.state = StateOpened
-	p.stopC = make(chan struct{})
 
-	p.confirmC = make(chan amqp.Confirmation, 1) // channel关闭时自动关闭
-	p.ch.Confirm(false)
-	p.ch.NotifyPublish(p.confirmC)
+	// 初始化发送Confirm
+	if p.enableConfirm {
+		p.confirmC = make(chan amqp.Confirmation, 1) // channel关闭时自动关闭
+		p.ch.Confirm(false)
+		p.ch.NotifyPublish(p.confirmC)
+		if p.confirm == nil {
+			p.confirm = newConfirmHelper(p.rrdSize)
+		} else {
+			p.confirm.Reset()
+		}
 
-	p.closeC = make(chan *amqp.Error, 1) // channel关闭时自动关闭
-	p.ch.NotifyClose(p.closeC)
+		go p.listenConfirm()
+	}
 
-	go p.listenConfirm()
-	go p.keepalive()
+	// 初始化Keepalive
+	if true {
+		p.stopC = make(chan struct{})
+		p.closeC = make(chan *amqp.Error, 1) // channel关闭时自动关闭
+		p.ch.NotifyClose(p.closeC)
+
+		go p.keepalive()
+	}
 
 	return nil
 }
@@ -118,6 +155,7 @@ func (p *Producer) Close() {
 	}
 }
 
+// 在同步Publish Confirm模式下, 每次Publish将额外有约50ms的等待时间.如果采用这种模式,建议上层并发publish
 func (p *Producer) Publish(exchange, routeKey string, msg *PublishMsg) error {
 	if msg == nil {
 		return errors.New("MQ: Nil publish msg")
@@ -137,7 +175,15 @@ func (p *Producer) Publish(exchange, routeKey string, msg *PublishMsg) error {
 		Timestamp:       msg.Timestamp,
 		Body:            msg.Body,
 	}
-	return p.ch.Publish(exchange, routeKey, false, false, pub)
+	if err := p.ch.Publish(exchange, routeKey, false, false, pub); err != nil {
+		return fmt.Errorf("MQ: Producer publish failed, %v", err)
+	}
+	if p.enableConfirm {
+		if ack, ok := <-p.confirm.Listen(); !ack || !ok {
+			return fmt.Errorf("MQ: Producer publish failed, confirm ack is false. ack:%t, ok:%t", ack, ok)
+		}
+	}
+	return nil
 }
 
 func (p *Producer) State() uint8 {
@@ -188,15 +234,8 @@ func (p *Producer) keepalive() {
 }
 
 func (p *Producer) listenConfirm() {
-	for {
-		select {
-		case <-p.stopC:
-			return
-		case <-p.closeC:
-			return
-		case confirms := <-p.confirmC:
-			log.Warn("Receive confirm, %d, %t", confirms.DeliveryTag, confirms.Ack)
-		}
+	for c := range p.confirmC {
+		p.confirm.Callback(c.DeliveryTag, c.Ack)
 	}
 }
 
@@ -244,6 +283,7 @@ func applyExchangeBinds(ch *amqp.Channel, exchangeBinds []*ExchangeBinds) (err e
 	return nil
 }
 
+// confirmHelper 使用RRD来实现了无锁的可复用的回调通知模型
 type confirmHelper struct {
 	// rrd size
 	size uint64
@@ -254,22 +294,37 @@ type confirmHelper struct {
 }
 
 // size should be large enough to avoid read/write concurrently
-func newConfirmHelper(size uint64) confirmHelper {
+func newConfirmHelper(size uint64) *confirmHelper {
 	if size <= 0 {
-		panic("Size must be over 0")
+		panic("RRD size must be over 0")
 	}
-	var h = confirmHelper{
-		lastAckIdx: 0,
-		size:       size,
-		rrd:        make([]chan bool, size),
+	h := &confirmHelper{
+		size: size,
+		rrd:  make([]chan bool, size),
+	}
+	return h.Reset()
+}
+
+func (h *confirmHelper) Reset() *confirmHelper {
+	h.lastAckIdx = uint64(0)
+	// 释放并重建RRD
+	var ch chan bool
+	for i, _ := range h.rrd {
+		ch, h.rrd[i] = h.rrd[i], make(chan bool, 1)
+		if ch != nil {
+			close(ch)
+		}
 	}
 	return h
 }
 
-func (h *confirmHelper) listen() <-chan bool {
+func (h *confirmHelper) Listen() <-chan bool {
 	curIdx := atomic.AddUint64(&h.lastAckIdx, uint64(1))
-	curIdx = curIdx % size
-	ch := h.rrd[curIdx]
-	if ch == nil {
-	}
+	curIdx = curIdx % h.size
+	return h.rrd[curIdx]
+}
+
+func (h *confirmHelper) Callback(idx uint64, ack bool) {
+	idx = idx % h.size
+	h.rrd[idx] <- ack
 }

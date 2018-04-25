@@ -5,7 +5,6 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
-	"time"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -16,7 +15,8 @@ import (
 )
 
 var (
-	MQURL = g.MQURL
+	MQURL     = g.MQURL
+	PProfAddr = ":11111"
 )
 
 func main() {
@@ -46,38 +46,42 @@ func main() {
 		},
 	}
 
-	for i := 0; i < 1; i++ {
+	// 使用不同的producer并发publish
+	for i := 0; i < 10; i++ {
 		go func(idx int) {
 			p, err := m.Producer(strconv.Itoa(i))
 			if err != nil {
 				log.Error("Create producer failed, %v", err)
 				return
 			}
-			if err = p.SetExchangeBinds(exb).Open(); err != nil {
+			if err = p.SetExchangeBinds(exb).Confirm(true).Open(); err != nil {
 				log.Error("Open failed, %v", err)
 				return
 			}
 
-			ticker := time.NewTicker(1 * time.Millisecond)
-			msg := mq.NewPublishMsg([]byte(`{"name":"zwf"}`))
-			for {
-				select {
-				case <-ticker.C:
-					err = p.Publish("exch.unitest", "route.unitest2", msg)
-					_ = err
-					//log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
-				}
+			// 使用同一个producer并发publish
+			for j := 0; j < 10000; j++ {
+				go func() {
+					msg := mq.NewPublishMsg([]byte(`{"name":"zwf"}`))
+					for {
+						err = p.Publish("exch.unitest", "route.unitest2", msg)
+						if err != nil {
+							log.Error(err.Error())
+						}
+						//log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
+					}
+				}()
 			}
 
 		}(i)
 	}
 
 	go func() {
-		http.ListenAndServe(":11111", nil)
+		http.ListenAndServe(PProfAddr, nil)
 	}()
 
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	//for i := 0; i < 1000; i++ {
 	//	if i > 0 && i%3 == 0 {
