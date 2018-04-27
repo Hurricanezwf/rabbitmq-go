@@ -149,6 +149,8 @@ func (p *Producer) Open() error {
 }
 
 func (p *Producer) Close() {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 	if p.stopC != nil {
 		close(p.stopC)
 		p.stopC = nil
