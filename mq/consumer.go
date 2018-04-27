@@ -125,6 +125,8 @@ func (c *Consumer) Open() error {
 }
 
 func (c *Consumer) Close() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	if c.stopC != nil {
 		close(c.stopC)
 		c.stopC = nil

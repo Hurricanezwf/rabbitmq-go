@@ -74,7 +74,11 @@ func (m *MQ) Open() (mq *MQ, err error) {
 }
 
 func (m *MQ) Close() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
 	m.closeProducers()
+
 	// close mq connection
 	if m.stopC != nil {
 		close(m.stopC)
