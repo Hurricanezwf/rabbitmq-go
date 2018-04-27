@@ -45,7 +45,7 @@ func main() {
 		},
 	}
 
-	msgC := make(chan []byte, 1)
+	msgC := make(chan *mq.Delivery, 1)
 	defer close(msgC)
 
 	if err = c.SetExchangeBinds(exb).SetMsgCallback(msgC).Open(); err != nil {

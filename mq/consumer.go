@@ -10,6 +10,10 @@ import (
 	"github.com/streadway/amqp"
 )
 
+type Delivery struct {
+	amqp.Delivery
+}
+
 type Consumer struct {
 	// Consumer的名字, "" is OK
 	name string
@@ -27,7 +31,7 @@ type Consumer struct {
 	exchangeBinds []*ExchangeBinds
 
 	// 上层用于接收消费出来的消息的管道
-	callback chan<- []byte
+	callback chan<- *Delivery
 
 	// 监听会话channel关闭
 	closeC chan *amqp.Error
@@ -66,7 +70,7 @@ func (c *Consumer) SetExchangeBinds(eb []*ExchangeBinds) *Consumer {
 	return c
 }
 
-func (c *Consumer) SetMsgCallback(cb chan<- []byte) *Consumer {
+func (c *Consumer) SetMsgCallback(cb chan<- *Delivery) *Consumer {
 	c.mutex.Lock()
 	c.callback = cb
 	c.mutex.Unlock()
@@ -164,11 +168,9 @@ func (c *Consumer) consume(opt *ConsumeOption, notifyErr chan<- error) {
 
 func (c *Consumer) deliver(delivery <-chan amqp.Delivery) {
 	for d := range delivery {
-		// Callback
 		if c.callback != nil {
-			c.callback <- d.Body
+			c.callback <- &Delivery{d}
 		}
-		d.Ack(true)
 	}
 }
 
