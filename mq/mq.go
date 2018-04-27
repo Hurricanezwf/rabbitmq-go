@@ -77,7 +77,17 @@ func (m *MQ) Close() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	m.closeProducers()
+	// close producers
+	for _, p := range m.producers {
+		p.Close()
+	}
+	m.producers = m.producers[:0]
+
+	// close consumers
+	for _, c := range m.consumers {
+		c.Close()
+	}
+	m.consumers = m.consumers[:0]
 
 	// close mq connection
 	if m.stopC != nil {
@@ -168,13 +178,4 @@ func (m *MQ) channel() (*amqp.Channel, error) {
 
 func (m MQ) dial() (*amqp.Connection, error) {
 	return amqp.Dial(m.url)
-}
-
-func (m *MQ) closeProducers() {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	for _, p := range m.producers {
-		p.Close()
-	}
-	m.producers = m.producers[:0]
 }
