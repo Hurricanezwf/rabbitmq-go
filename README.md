@@ -11,5 +11,5 @@
 * 直接make
 
 ### 如何嵌入到自己的代码中?
-* import "github.com/Hurricanezwf/rabbitmq/mq"
+* import "github.com/Hurricanezwf/rabbitmq-go/mq"
 * 参照cmd中的生产者和消费者demo使用
