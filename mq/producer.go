@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Hurricanezwf/toolbox/log"
@@ -19,7 +18,13 @@ type Producer struct {
 	// MQ实例
 	mq *MQ
 
-	// 保护数据并发安全
+	// channel pool, 重复使用
+	chPool *sync.Pool
+
+	// publish数据的锁
+	publishMutex sync.RWMutex
+
+	// 保护数据安全地并发读写
 	mutex sync.RWMutex
 
 	// MQ的会话channel
@@ -34,9 +39,6 @@ type Producer struct {
 	confirmC chan amqp.Confirmation
 	// confirm结果检测
 	confirm *confirmHelper
-	// confirm RRD大小, 理论上RRD越大,冲突概率越小,但响应的资源消耗越大
-	// 视最大并发量而定, 默认1024
-	rrdSize uint64
 
 	// 监听会话channel关闭
 	closeC chan *amqp.Error
@@ -49,10 +51,12 @@ type Producer struct {
 
 func newProducer(name string, mq *MQ) *Producer {
 	return &Producer{
-		name:    name,
-		mq:      mq,
-		state:   StateClosed,
-		rrdSize: 1024,
+		name: name,
+		mq:   mq,
+		chPool: &sync.Pool{
+			New: func() interface{} { return make(chan bool, 1) },
+		},
+		state: StateClosed,
 	}
 }
 
@@ -72,15 +76,6 @@ func (p *Producer) CloseChan() {
 func (p *Producer) Confirm(enable bool) *Producer {
 	p.mutex.Lock()
 	p.enableConfirm = enable
-	p.mutex.Unlock()
-	return p
-}
-
-// RRDSize 设置无锁环形缓冲区的大小, 默认为1024
-// Producer Open之后将无法重置
-func (p *Producer) RRDSize(size uint64) *Producer {
-	p.mutex.Lock()
-	p.rrdSize = size
 	p.mutex.Unlock()
 	return p
 }
@@ -128,7 +123,7 @@ func (p *Producer) Open() error {
 		p.ch.Confirm(false)
 		p.ch.NotifyPublish(p.confirmC)
 		if p.confirm == nil {
-			p.confirm = newConfirmHelper(p.rrdSize)
+			p.confirm = newConfirmHelper()
 		} else {
 			p.confirm.Reset()
 		}
@@ -158,8 +153,6 @@ func (p *Producer) Close() {
 }
 
 // 在同步Publish Confirm模式下, 每次Publish将额外有约50ms的等待时间.如果采用这种模式,建议上层并发publish
-var count = 0
-
 func (p *Producer) Publish(exchange, routeKey string, msg *PublishMsg) error {
 	if msg == nil {
 		return errors.New("MQ: Nil publish msg")
@@ -178,17 +171,26 @@ func (p *Producer) Publish(exchange, routeKey string, msg *PublishMsg) error {
 		Body:            msg.Body,
 	}
 
+	// 非confirm模式
+	if p.enableConfirm == false {
+		return p.ch.Publish(exchange, routeKey, false, false, pub)
+	}
+
+	// confirm模式
+	// 这里加锁保证消息发送顺序与接收ack的channel的编号一致
+	p.publishMutex.Lock()
 	if err := p.ch.Publish(exchange, routeKey, false, false, pub); err != nil {
+		p.publishMutex.Unlock()
 		return fmt.Errorf("MQ: Producer publish failed, %v", err)
 	}
-	if count <= 0 {
-		p.ch.Close()
-	}
-	count++
-	if p.enableConfirm {
-		if ack, ok := <-p.confirm.Listen(); !ack || !ok {
-			return fmt.Errorf("MQ: Producer publish failed, confirm ack is false. ack:%t, ok:%t", ack, ok)
-		}
+	ch := p.chPool.Get().(chan bool)
+	p.confirm.Listen(ch)
+	p.publishMutex.Unlock()
+
+	ack, ok := <-ch
+	p.chPool.Put(ch)
+	if !ack || !ok {
+		return fmt.Errorf("MQ: Producer publish failed, confirm ack is false. ack:%t, ok:%t", ack, ok)
 	}
 	return nil
 }
@@ -241,7 +243,8 @@ func (p *Producer) keepalive() {
 
 func (p *Producer) listenConfirm() {
 	for c := range p.confirmC {
-		p.confirm.Callback(c.DeliveryTag, c.Ack)
+		// TODO: 可以做个并发控制
+		go p.confirm.Callback(c.DeliveryTag, c.Ack)
 	}
 }
 
@@ -289,22 +292,18 @@ func applyExchangeBinds(ch *amqp.Channel, exchangeBinds []*ExchangeBinds) (err e
 	return nil
 }
 
-// 由producer管理sync.Pool
-type confirmHelper2 struct {
-	mutex      sync.RWMutex
-	listeners  map[uint64]chan bool
-	pool       *sync.Pool
-	lastAckIdx uint64
+type confirmHelper struct {
+	mutex     sync.RWMutex
+	listeners map[uint64]chan<- bool
+	count     uint64
 }
 
-func newConfirmHelper2() *confirmHelper2 {
-	h := confirmHelper2{}
+func newConfirmHelper() *confirmHelper {
+	h := confirmHelper{}
 	return h.Reset()
 }
 
-// 关闭所有Listener， 重建listenner
-// 重置lastAckIdx
-func (h *confirmHelper2) Reset() *confirmHelper2 {
+func (h *confirmHelper) Reset() *confirmHelper {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
@@ -314,70 +313,22 @@ func (h *confirmHelper2) Reset() *confirmHelper2 {
 	}
 
 	// Reset
-	h.lastAckIdx = uint64(0)
-	h.listeners = make(map[uint64]chan bool)
-	h.pool = &sync.Pool{
-		New: func() interface{} {
-			return make(chan bool, 1)
-		},
-	}
+	h.count = uint64(0)
+	h.listeners = make(map[uint64]chan<- bool)
 	return h
 }
 
-// 传入chan bool， 将其设置到map中管理起来
-func (h *confirmHelper2) Listen() chan bool {
-	return nil
-}
-
-// 向指定索引处的chan发送ack
-func (h *confirmHelper2) Callback() {
-}
-
-// confirmHelper 使用RRD来实现了无锁的可复用的回调通知模型
-// 可否换成pool复用chan加map的方式？
-type confirmHelper struct {
-	// rrd size
-	size uint64
-	rrd  []chan bool
-
-	// ackIdx
-	lastAckIdx uint64
-}
-
-// size should be large enough to avoid read/write concurrently
-func newConfirmHelper(size uint64) *confirmHelper {
-	if size <= 0 {
-		panic("RRD size must be over 0")
-	}
-	h := &confirmHelper{
-		size: size,
-		rrd:  make([]chan bool, size),
-	}
-	return h.Reset()
-}
-
-func (h *confirmHelper) Reset() *confirmHelper {
-	h.lastAckIdx = uint64(0)
-	// 释放并重建RRD
-	var ch chan bool
-	for i, _ := range h.rrd {
-		ch, h.rrd[i] = h.rrd[i], make(chan bool, 1)
-		if ch != nil {
-			close(ch)
-		}
-	}
-	return h
-}
-
-func (h *confirmHelper) Listen() <-chan bool {
-	curIdx := atomic.AddUint64(&h.lastAckIdx, uint64(1))
-	curIdx = curIdx % h.size
-	log.Info("Listen idx:%d", curIdx)
-	return h.rrd[curIdx]
+func (h *confirmHelper) Listen(ch chan<- bool) {
+	h.mutex.Lock()
+	h.count++
+	h.listeners[h.count] = ch
+	h.mutex.Unlock()
 }
 
 func (h *confirmHelper) Callback(idx uint64, ack bool) {
-	idx = idx % h.size
-	log.Info("Callback Idx:%d", idx)
-	h.rrd[idx] <- ack
+	h.mutex.Lock()
+	ch := h.listeners[idx]
+	delete(h.listeners, idx)
+	h.mutex.Unlock()
+	ch <- ack
 }
