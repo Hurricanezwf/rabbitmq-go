@@ -12,7 +12,6 @@ import (
 	"github.com/Hurricanezwf/rabbitmq-go/g"
 	"github.com/Hurricanezwf/rabbitmq-go/mq"
 	"github.com/Hurricanezwf/toolbox/log"
-	"time"
 )
 
 var (
@@ -61,18 +60,18 @@ func main() {
 			}
 
 			// 使用同一个producer并发publish
-			for j := 0; j < 2; j++ {
+			for j := 0; j < 1000; j++ {
 				go func() {
 					msg := mq.NewPublishMsg([]byte(`{"name":"zwf"}`))
-					for x := 0; x < 1; x++ {
+					for {
 						err = p.Publish("exch.unitest", "route.unitest2", msg)
 						if err != nil {
 							log.Error(err.Error())
 						}
-						log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
+						//log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
 					}
 				}()
-				time.Sleep(10 * time.Second)
+				//time.Sleep(10 * time.Second)
 			}
 
 		}(i)
