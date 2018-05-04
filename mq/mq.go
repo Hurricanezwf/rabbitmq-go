@@ -21,11 +21,11 @@ var (
 )
 
 type MQ struct {
-	// 保护内部数据并发读写
-	mutex sync.RWMutex
-
 	// RabbitMQ连接的url
 	url string
+
+	// 保护内部数据并发读写
+	mutex sync.RWMutex
 
 	// RabbitMQ TCP连接
 	conn *amqp.Connection
@@ -75,15 +75,26 @@ func (m *MQ) Open() (mq *MQ, err error) {
 
 func (m *MQ) Close() {
 	m.mutex.Lock()
-	defer m.mutex.Unlock()
 
-	m.closeProducers()
+	// close producers
+	for _, p := range m.producers {
+		p.Close()
+	}
+	m.producers = m.producers[:0]
+
+	// close consumers
+	for _, c := range m.consumers {
+		c.Close()
+	}
+	m.consumers = m.consumers[:0]
 
 	// close mq connection
 	if m.stopC != nil {
 		close(m.stopC)
-		m.stopC = nil
 	}
+
+	m.mutex.Unlock()
+
 	// wait done
 	for m.State() != StateClosed {
 		time.Sleep(time.Second)
@@ -168,13 +179,4 @@ func (m *MQ) channel() (*amqp.Channel, error) {
 
 func (m MQ) dial() (*amqp.Connection, error) {
 	return amqp.Dial(m.url)
-}
-
-func (m *MQ) closeProducers() {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	for _, p := range m.producers {
-		p.Close()
-	}
-	m.producers = m.producers[:0]
 }

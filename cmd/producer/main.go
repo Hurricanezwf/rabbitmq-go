@@ -12,6 +12,7 @@ import (
 	"github.com/Hurricanezwf/rabbitmq-go/g"
 	"github.com/Hurricanezwf/rabbitmq-go/mq"
 	"github.com/Hurricanezwf/toolbox/log"
+	"time"
 )
 
 var (
@@ -47,7 +48,7 @@ func main() {
 	}
 
 	// 使用不同的producer并发publish
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 1; i++ {
 		go func(idx int) {
 			p, err := m.Producer(strconv.Itoa(i))
 			if err != nil {
@@ -60,17 +61,18 @@ func main() {
 			}
 
 			// 使用同一个producer并发publish
-			for j := 0; j < 10000; j++ {
+			for j := 0; j < 2; j++ {
 				go func() {
 					msg := mq.NewPublishMsg([]byte(`{"name":"zwf"}`))
-					for {
+					for x := 0; x < 1; x++ {
 						err = p.Publish("exch.unitest", "route.unitest2", msg)
 						if err != nil {
 							log.Error(err.Error())
 						}
-						//log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
+						log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
 					}
 				}()
+				time.Sleep(10 * time.Second)
 			}
 
 		}(i)

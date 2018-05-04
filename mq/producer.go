@@ -158,17 +158,17 @@ func (p *Producer) Close() {
 }
 
 // 在同步Publish Confirm模式下, 每次Publish将额外有约50ms的等待时间.如果采用这种模式,建议上层并发publish
+var count = 0
+
 func (p *Producer) Publish(exchange, routeKey string, msg *PublishMsg) error {
 	if msg == nil {
 		return errors.New("MQ: Nil publish msg")
 	}
 
-	p.mutex.RLock()
-	defer p.mutex.RUnlock()
-
-	if p.state != StateOpened {
+	if st := p.State(); st != StateOpened {
 		return fmt.Errorf("MQ: Producer unopened, now state is %d", p.state)
 	}
+
 	pub := amqp.Publishing{
 		ContentType:     msg.ContentType,
 		ContentEncoding: msg.ContentEncoding,
@@ -177,9 +177,14 @@ func (p *Producer) Publish(exchange, routeKey string, msg *PublishMsg) error {
 		Timestamp:       msg.Timestamp,
 		Body:            msg.Body,
 	}
+
 	if err := p.ch.Publish(exchange, routeKey, false, false, pub); err != nil {
 		return fmt.Errorf("MQ: Producer publish failed, %v", err)
 	}
+	if count <= 0 {
+		p.ch.Close()
+	}
+	count++
 	if p.enableConfirm {
 		if ack, ok := <-p.confirm.Listen(); !ack || !ok {
 			return fmt.Errorf("MQ: Producer publish failed, confirm ack is false. ack:%t, ok:%t", ack, ok)
@@ -201,7 +206,6 @@ func (p *Producer) keepalive() {
 		log.Warn("MQ: Producer(%s) shutdown normally.", p.name)
 		p.mutex.Lock()
 		p.ch.Close()
-		p.ch = nil
 		p.state = StateClosed
 		p.mutex.Unlock()
 
@@ -285,7 +289,52 @@ func applyExchangeBinds(ch *amqp.Channel, exchangeBinds []*ExchangeBinds) (err e
 	return nil
 }
 
+// 由producer管理sync.Pool
+type confirmHelper2 struct {
+	mutex      sync.RWMutex
+	listeners  map[uint64]chan bool
+	pool       *sync.Pool
+	lastAckIdx uint64
+}
+
+func newConfirmHelper2() *confirmHelper2 {
+	h := confirmHelper2{}
+	return h.Reset()
+}
+
+// 关闭所有Listener， 重建listenner
+// 重置lastAckIdx
+func (h *confirmHelper2) Reset() *confirmHelper2 {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
+	// 解除所有等待listener返回ACK的阻塞的地方
+	for _, ch := range h.listeners {
+		close(ch)
+	}
+
+	// Reset
+	h.lastAckIdx = uint64(0)
+	h.listeners = make(map[uint64]chan bool)
+	h.pool = &sync.Pool{
+		New: func() interface{} {
+			return make(chan bool, 1)
+		},
+	}
+	return h
+}
+
+// 传入chan bool， 将其设置到map中管理起来
+func (h *confirmHelper2) Listen() chan bool {
+	return nil
+}
+
+// 向指定索引处的chan发送ack
+func (h *confirmHelper2) Callback() {
+}
+
 // confirmHelper 使用RRD来实现了无锁的可复用的回调通知模型
+// 可否换成pool复用chan加map的方式？
 type confirmHelper struct {
 	// rrd size
 	size uint64
@@ -323,10 +372,12 @@ func (h *confirmHelper) Reset() *confirmHelper {
 func (h *confirmHelper) Listen() <-chan bool {
 	curIdx := atomic.AddUint64(&h.lastAckIdx, uint64(1))
 	curIdx = curIdx % h.size
+	log.Info("Listen idx:%d", curIdx)
 	return h.rrd[curIdx]
 }
 
 func (h *confirmHelper) Callback(idx uint64, ack bool) {
 	idx = idx % h.size
+	log.Info("Callback Idx:%d", idx)
 	h.rrd[idx] <- ack
 }

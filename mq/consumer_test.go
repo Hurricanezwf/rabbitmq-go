@@ -39,7 +39,7 @@ func TestConsumer(t *testing.T) {
 		},
 	}
 
-	msgC := make(chan Delivery, 1)
+	msgC := make(chan *Delivery, 1)
 	defer close(msgC)
 
 	if err = c.SetExchangeBinds(exb).SetMsgCallback(msgC).Open(); err != nil {
