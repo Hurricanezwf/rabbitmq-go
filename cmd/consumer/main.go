@@ -54,7 +54,7 @@ func main() {
 	}
 
 	for msg := range msgC {
-		//log.Info("Tag(%d)", msg.DeliveryTag)
+		log.Info("Tag(%d)", msg.DeliveryTag)
 		msg.Ack(true)
 		//if i%5 == 0 {
 		//	c.CloseChan()

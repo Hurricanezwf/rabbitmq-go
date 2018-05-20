@@ -5,6 +5,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -60,7 +61,7 @@ func main() {
 			}
 
 			// 使用同一个producer并发publish
-			for j := 0; j < 1000; j++ {
+			for j := 0; j < 1; j++ {
 				go func() {
 					msg := mq.NewPublishMsg([]byte(`{"name":"zwf"}`))
 					for {
@@ -71,7 +72,7 @@ func main() {
 						//log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
 					}
 				}()
-				//time.Sleep(10 * time.Second)
+				time.Sleep(1 * time.Second)
 			}
 
 		}(i)
