@@ -6,10 +6,10 @@ DefaultPassword="zwf"
 ImageName="rabbitmq:3.7.4-management"
 
 
+docker pull ${ImageName}
 
 # 创建集群网络(不然不同结点不能互通)
 docker network create rabbitmq-net
-
 
 
 
