@@ -184,7 +184,7 @@ func (c *Consumer) keepalive() {
 	select {
 	case <-c.stopC:
 		// 正常关闭
-		log.Printf("[WARN] Consumer(%s) shutdown normally\n", c.Name)
+		log.Printf("[WARN] Consumer(%s) shutdown normally\n", c.Name())
 		c.mutex.Lock()
 		c.ch.Close()
 		c.ch = nil
