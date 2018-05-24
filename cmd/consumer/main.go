@@ -1,9 +1,10 @@
 package main
 
 import (
+	"log"
+
 	"github.com/Hurricanezwf/rabbitmq-go/g"
 	"github.com/Hurricanezwf/rabbitmq-go/mq"
-	"github.com/Hurricanezwf/toolbox/log"
 )
 
 var (
@@ -13,14 +14,14 @@ var (
 func main() {
 	m, err := mq.New(MQURL).Open()
 	if err != nil {
-		log.Error(err.Error())
+		log.Printf("[ERROR] %s\n", err.Error())
 		return
 	}
 	defer m.Close()
 
 	c, err := m.Consumer("test-consume")
 	if err != nil {
-		log.Error("Create consumer failed, %v", err)
+		log.Printf("[ERROR] Create consumer failed, %v\n", err)
 		return
 	}
 	defer c.Close()
@@ -49,7 +50,7 @@ func main() {
 	defer close(msgC)
 
 	if err = c.SetExchangeBinds(exb).SetMsgCallback(msgC).Open(); err != nil {
-		log.Error("Open failed, %v", err)
+		log.Printf("[ERROR] Open failed, %v\n", err)
 		return
 	}
 

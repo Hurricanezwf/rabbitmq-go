@@ -3,10 +3,9 @@ package mq
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
-
-	"github.com/Hurricanezwf/toolbox/log"
 
 	"github.com/streadway/amqp"
 )
@@ -205,7 +204,7 @@ func (p *Producer) keepalive() {
 	select {
 	case <-p.stopC:
 		// 正常关闭
-		log.Warn("MQ: Producer(%s) shutdown normally.", p.name)
+		log.Printf("[WARN] MQ: Producer(%s) shutdown normally.\n", p.name)
 		p.mutex.Lock()
 		p.ch.Close()
 		p.state = StateClosed
@@ -213,9 +212,9 @@ func (p *Producer) keepalive() {
 
 	case err := <-p.closeC:
 		if err == nil {
-			log.Error("MQ: Producer(%s)'s channel was closed, but Error detail is nil", p.name)
+			log.Printf("[ERROR] MQ: Producer(%s)'s channel was closed, but Error detail is nil\n", p.name)
 		} else {
-			log.Error("MQ: Producer(%s)'s channel was closed, code:%d, reason:%s", p.name, err.Code, err.Reason)
+			log.Printf("[ERROR] MQ: Producer(%s)'s channel was closed, code:%d, reason:%s\n", p.name, err.Code, err.Reason)
 		}
 
 		// channel被异常关闭了
@@ -227,17 +226,17 @@ func (p *Producer) keepalive() {
 		for i := 0; i < maxRetry; i++ {
 			time.Sleep(time.Second)
 			if p.mq.State() != StateOpened {
-				log.Warn("MQ: Producer(%s) try to recover channel for %d times, but mq's state != StateOpened", p.name, i+1)
+				log.Printf("[WARN] MQ: Producer(%s) try to recover channel for %d times, but mq's state != StateOpened\n", p.name, i+1)
 				continue
 			}
 			if e := p.Open(); e != nil {
-				log.Error("MQ: Producer(%s) recover channel failed for %d times, Err:%v", p.name, i+1, e)
+				log.Printf("[WARN] MQ: Producer(%s) recover channel failed for %d times, Err:%v\n", p.name, i+1, e)
 				continue
 			}
-			log.Info("MQ: Producer(%s) recover channel OK. Total try %d times", p.name, i+1)
+			log.Printf("[INFO] MQ: Producer(%s) recover channel OK. Total try %d times\n", p.name, i+1)
 			return
 		}
-		log.Error("MQ: Producer(%s) try to recover channel over maxRetry(%d), so exit", p.name, maxRetry)
+		log.Printf("[ERROR] MQ: Producer(%s) try to recover channel over maxRetry(%d), so exit\n", p.name, maxRetry)
 	}
 }
 

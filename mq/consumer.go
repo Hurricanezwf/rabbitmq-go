@@ -3,10 +3,10 @@ package mq
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
-	"github.com/Hurricanezwf/toolbox/log"
 	"github.com/streadway/amqp"
 )
 
@@ -116,7 +116,7 @@ func (c *Consumer) Open() error {
 	c.consume(opt, notify)
 	for e := range notify {
 		if e != nil {
-			log.Error(e.Error())
+			log.Printf("[ERROR] %v\n", e)
 			continue
 		}
 		break
@@ -184,7 +184,7 @@ func (c *Consumer) keepalive() {
 	select {
 	case <-c.stopC:
 		// 正常关闭
-		log.Warn("MQ: Consumer(%s) shutdown normally.", c.name)
+		log.Printf("[WARN] Consumer(%s) shutdown normally\n", c.Name)
 		c.mutex.Lock()
 		c.ch.Close()
 		c.ch = nil
@@ -193,9 +193,9 @@ func (c *Consumer) keepalive() {
 
 	case err := <-c.closeC:
 		if err == nil {
-			log.Error("MQ: Consumer(%s)'s channel was closed, but Error detail is nil", c.name)
+			log.Printf("[ERROR] MQ: Consumer(%s)'s channel was closed, but Error detail is nil\n", c.name)
 		} else {
-			log.Error("MQ: Consumer(%s)'s channel was closed, code:%d, reason:%s", c.name, err.Code, err.Reason)
+			log.Printf("[ERROR] MQ: Consumer(%s)'s channel was closed, code:%d, reason:%s\n", c.name, err.Code, err.Reason)
 		}
 
 		// channel被异常关闭了
@@ -207,16 +207,16 @@ func (c *Consumer) keepalive() {
 		for i := 0; i < maxRetry; i++ {
 			time.Sleep(time.Second)
 			if c.mq.State() != StateOpened {
-				log.Warn("MQ: Consumer(%s) try to recover channel for %d times, but mq's state != StateOpened", c.name, i+1)
+				log.Printf("[WARN] MQ: Consumer(%s) try to recover channel for %d times, but mq's state != StateOpened\n", c.name, i+1)
 				continue
 			}
 			if e := c.Open(); e != nil {
-				log.Error("MQ: Consumer(%s) recover channel failed for %d times, Err:%v", c.name, i+1, e)
+				log.Printf("[WARN] MQ: Consumer(%s) recover channel failed for %d times, Err:%v\n", c.name, i+1, e)
 				continue
 			}
-			log.Info("MQ: Consumer(%s) recover channel OK. Total try %d times", c.name, i+1)
+			log.Printf("[INFO] MQ: Consumer(%s) recover channel OK. Total try %d times\n", c.name, i+1)
 			return
 		}
-		log.Error("MQ: Consumer(%s) try to recover channel over maxRetry(%d), so exit", c.name, maxRetry)
+		log.Printf("[ERROR] MQ: Consumer(%s) try to recover channel over maxRetry(%d), so exit\n", c.name, maxRetry)
 	}
 }

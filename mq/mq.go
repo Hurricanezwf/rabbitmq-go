@@ -6,10 +6,9 @@ package mq
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
-
-	"github.com/Hurricanezwf/toolbox/log"
 
 	"github.com/streadway/amqp"
 )
@@ -135,7 +134,7 @@ func (m *MQ) keepalive() {
 	select {
 	case <-m.stopC:
 		// 正常关闭
-		log.Warn("MQ: Shutdown normally.")
+		log.Println("[WARN] MQ: Shutdown normally.")
 		m.mutex.Lock()
 		m.conn.Close()
 		m.state = StateClosed
@@ -143,9 +142,9 @@ func (m *MQ) keepalive() {
 
 	case err := <-m.closeC:
 		if err == nil {
-			log.Error("MQ: Disconnected with MQ, but Error detail is nil")
+			log.Println("[ERROR] MQ: Disconnected with MQ, but Error detail is nil")
 		} else {
-			log.Error("MQ: Disconnected with MQ, code:%d, reason:%s", err.Code, err.Reason)
+			log.Printf("[ERROR] MQ: Disconnected with MQ, code:%d, reason:%s\n", err.Code, err.Reason)
 		}
 
 		// tcp连接中断, 重新连接
@@ -157,13 +156,13 @@ func (m *MQ) keepalive() {
 		for i := 0; i < maxRetry; i++ {
 			time.Sleep(time.Second)
 			if _, e := m.Open(); e != nil {
-				log.Error("MQ: Connection recover failed for %d times, %v", i+1, e)
+				log.Printf("[ERROR] MQ: Connection recover failed for %d times, %v\n", i+1, e)
 				continue
 			}
-			log.Info("MQ: Connection recover OK. Total try %d times", i+1)
+			log.Printf("[INFO] MQ: Connection recover OK. Total try %d times\n", i+1)
 			return
 		}
-		log.Error("MQ: Try to reconnect to MQ failed over maxRetry(%d), so exit.", maxRetry)
+		log.Printf("[ERROR] MQ: Try to reconnect to MQ failed over maxRetry(%d), so exit.\n", maxRetry)
 	}
 }
 
@@ -179,4 +178,8 @@ func (m *MQ) channel() (*amqp.Channel, error) {
 
 func (m MQ) dial() (*amqp.Connection, error) {
 	return amqp.Dial(m.url)
+}
+
+func init() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 }

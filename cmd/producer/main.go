@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"os"
 	"os/signal"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/Hurricanezwf/rabbitmq-go/g"
 	"github.com/Hurricanezwf/rabbitmq-go/mq"
-	"github.com/Hurricanezwf/toolbox/log"
 )
 
 var (
@@ -22,7 +22,7 @@ var (
 func main() {
 	m, err := mq.New(MQURL).Open()
 	if err != nil {
-		log.Error(err.Error())
+		log.Printf("[ERROR] %s\n", err.Error())
 		return
 	}
 
@@ -51,11 +51,11 @@ func main() {
 		go func(idx int) {
 			p, err := m.Producer(strconv.Itoa(i))
 			if err != nil {
-				log.Error("Create producer failed, %v", err)
+				log.Printf("[ERROR] Create producer failed, %v\n", err)
 				return
 			}
 			if err = p.SetExchangeBinds(exb).Confirm(true).Open(); err != nil {
-				log.Error("Open failed, %v", err)
+				log.Printf("[ERROR] Open failed, %v\n", err)
 				return
 			}
 
@@ -66,7 +66,7 @@ func main() {
 					for {
 						err = p.Publish("exch.unitest", "route.unitest2", msg)
 						if err != nil {
-							log.Error(err.Error())
+							log.Printf("[ERROR] %s\n", err.Error())
 						}
 						//log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
 					}
