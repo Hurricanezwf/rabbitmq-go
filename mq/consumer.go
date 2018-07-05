@@ -30,6 +30,9 @@ type Consumer struct {
 	// MQ的exchange与其绑定的queues
 	exchangeBinds []*ExchangeBinds
 
+	// Oos prefetch
+	prefetch int
+
 	// 上层用于接收消费出来的消息的管道
 	callback chan<- Delivery
 
@@ -77,31 +80,53 @@ func (c *Consumer) SetMsgCallback(cb chan<- Delivery) *Consumer {
 	return c
 }
 
-func (c *Consumer) Open() error {
-	if c.mq == nil {
-		return errors.New("MQ: Bad consumer")
-	}
+// SetQos 设置channel粒度的Qos, prefetch取值范围[0,∞), 默认为0
+// 如果想要RoundRobin地进行消费，设置prefetch为1即可
+// 注意:在调用Open前设置
+func (c *Consumer) SetQos(prefetch int) *Consumer {
+	c.mutex.Lock()
+	c.prefetch = prefetch
+	c.mutex.Unlock()
+	return c
+}
 
+func (c *Consumer) Open() error {
 	// Open期间不允许对channel做任何操作
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
+	// 参数校验
+	if c.mq == nil {
+		return errors.New("MQ: Bad consumer")
+	}
 	if len(c.exchangeBinds) <= 0 {
 		return errors.New("MQ: No exchangeBinds found. You should SetExchangeBinds brefore open.")
 	}
 
+	// 状态检测
 	if c.state == StateOpened {
 		return errors.New("MQ: Consumer had been opened")
 	}
 
+	// 初始化channel
 	ch, err := c.mq.channel()
 	if err != nil {
 		return fmt.Errorf("MQ: Create channel failed, %v", err)
 	}
 
-	if err = applyExchangeBinds(ch, c.exchangeBinds); err != nil {
+	err = func(ch *amqp.Channel) error {
+		var e error
+		if e = applyExchangeBinds(ch, c.exchangeBinds); e != nil {
+			return e
+		}
+		if e = ch.Qos(c.prefetch, 0, false); e != nil {
+			return e
+		}
+		return nil
+	}(ch)
+	if err != nil {
 		ch.Close()
-		return err
+		return fmt.Errorf("MQ: %v", err)
 	}
 
 	c.ch = ch
@@ -110,7 +135,7 @@ func (c *Consumer) Open() error {
 	c.closeC = make(chan *amqp.Error, 1)
 	c.ch.NotifyClose(c.closeC)
 
-	// start consume
+	// 开始循环消费
 	opt := DefaultConsumeOption()
 	notify := make(chan error, 1)
 	c.consume(opt, notify)
@@ -123,6 +148,7 @@ func (c *Consumer) Open() error {
 	}
 	close(notify)
 
+	// 健康检测
 	go c.keepalive()
 
 	return nil
