@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/Hurricanezwf/rabbitmq-go/g"
 	"github.com/Hurricanezwf/rabbitmq-go/mq"
@@ -49,18 +50,21 @@ func main() {
 	msgC := make(chan mq.Delivery, 1)
 	defer close(msgC)
 
-	if err = c.SetExchangeBinds(exb).SetMsgCallback(msgC).Open(); err != nil {
+	c.SetExchangeBinds(exb)
+	c.SetMsgCallback(msgC)
+	c.SetQos(10)
+	if err = c.Open(); err != nil {
 		log.Printf("[ERROR] Open failed, %v\n", err)
 		return
 	}
 
 	for msg := range msgC {
-		log.Info("Tag(%d)", msg.DeliveryTag)
+		log.Printf("Tag(%d) Body: %s\n", msg.DeliveryTag, string(msg.Body))
 		msg.Ack(true)
 		//if i%5 == 0 {
 		//	c.CloseChan()
 		//}
 		//log.Info("Consumer receive msg `%s`", string(msg))
-		//time.Sleep(time.Second)
+		time.Sleep(time.Second)
 	}
 }

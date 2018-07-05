@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -62,16 +63,17 @@ func main() {
 
 			// 使用同一个producer并发publish
 			for j := 0; j < 1; j++ {
-				go func() {
-					msg := mq.NewPublishMsg([]byte(`{"name":"zwf"}`))
+				go func(v int) {
 					for {
+						v++
+						msg := mq.NewPublishMsg([]byte(fmt.Sprintf(`{"name":"zwf-%d"}`, v)))
 						err = p.Publish("exch.unitest", "route.unitest2", msg)
 						if err != nil {
 							log.Printf("[ERROR] %s\n", err.Error())
 						}
 						//log.Info("Producer(%d) state:%d, err:%v\n", i, p.State(), err)
 					}
-				}()
+				}(j)
 				time.Sleep(1 * time.Second)
 			}
 
