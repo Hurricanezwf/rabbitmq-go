@@ -157,9 +157,12 @@ func (c *Consumer) Open() error {
 func (c *Consumer) Close() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	if c.stopC != nil {
+
+	select {
+	case <-c.stopC:
+		// had been closed
+	default:
 		close(c.stopC)
-		c.stopC = nil
 	}
 }
 

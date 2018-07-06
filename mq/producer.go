@@ -145,9 +145,12 @@ func (p *Producer) Open() error {
 func (p *Producer) Close() {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	if p.stopC != nil {
+
+	select {
+	case <-p.stopC:
+		// had been closed
+	default:
 		close(p.stopC)
-		p.stopC = nil
 	}
 }
 

@@ -88,7 +88,10 @@ func (m *MQ) Close() {
 	m.consumers = m.consumers[:0]
 
 	// close mq connection
-	if m.stopC != nil {
+	select {
+	case <-m.stopC:
+		// had been closed
+	default:
 		close(m.stopC)
 	}
 
